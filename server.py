@@ -30,6 +30,17 @@ logging.basicConfig(
 )
 log = logging.getLogger("SyncWatchServer")
 
+# ── Load .env file (if exists) ───────────────────────
+try:
+    from dotenv import load_dotenv
+    env_loaded = load_dotenv()
+    if env_loaded:
+        log.info("Loaded environment from .env file")
+except ImportError:
+    pass
+except Exception:
+    pass
+
 
 # ── Protocol constants (mirror core/protocol.py) ─────────
 class MsgType:
@@ -1142,9 +1153,10 @@ class SyncWatchServer:
 # ── Main entry point ─────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="SyncWatch Multi-Room Server")
-    parser.add_argument("--port", "-p", type=int, default=8765,
+    parser.add_argument("--port", "-p", type=int,
+                        default=int(os.environ.get("SYNCWATCH_PORT", 8765)),
                         dest="port_flag",
-                        help="Server port (default: 8765)")
+                        help="Server port (default: 8765, from SYNCWATCH_PORT env)")
     parser.add_argument("--host", type=str, default="0.0.0.0",
                         help="Bind address (default: 0.0.0.0)")
     parser.add_argument("--github-token", "-t", type=str,
