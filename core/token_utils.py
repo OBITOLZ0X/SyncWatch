@@ -17,7 +17,7 @@ import hmac
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-_MASTER_SECRET = b"SyncWatch-AES-LZ"
+_MASTER_SECRET = b"SyncWatch-AES-2026"
 _NONCE_LEN = 12
 
 # ── v2: fixed key, deterministic nonce ────────────────────
