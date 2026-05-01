@@ -22,5 +22,13 @@
     "host": "162.220.232.178",
     "status": "online",
     "last_seen": "2026-05-01T12:51:31Z"
+  },
+  {
+    "url": "ws://52.8.242.172:8765",
+    "country": "United States",
+    "port": 8765,
+    "host": "52.8.242.172",
+    "status": "online",
+    "last_seen": "2026-05-01T12:51:52Z"
   }
 ]
