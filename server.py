@@ -20,6 +20,16 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+import ssl
+
+# ── Disable SSL verification for servers that lack CA certs (e.g. Windows RDP) ──
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
 import websockets
 
 # ── Logging ──────────────────────────────────────────────
@@ -30,16 +40,92 @@ logging.basicConfig(
 )
 log = logging.getLogger("SyncWatchServer")
 
-# ── Load .env file (if exists) ───────────────────────
-try:
-    from dotenv import load_dotenv
-    env_loaded = load_dotenv()
-    if env_loaded:
-        log.info("Loaded environment from .env file")
-except ImportError:
-    pass
-except Exception:
-    pass
+# ── Load .env file (manually, no dependency needed) ──
+def _load_dotenv_file(env_path: str) -> bool:
+    """Manually parse a .env file and set os.environ."""
+    if not os.path.isfile(env_path):
+        return False
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip()
+                # Remove surrounding quotes if present
+                if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                    val = val[1:-1]
+                if key:
+                    os.environ[key] = val
+        return True
+    except Exception:
+        return False
+
+
+def _load_env_file():
+    """Load .env from multiple locations to support both script and PyInstaller EXE.
+    
+    First tries to use python-dotenv if available, then falls back to manual parsing.
+    """
+    # Possible locations for .env (in priority order)
+    candidates = []
+
+    # 1. PyInstaller EXE directory (r"C:\...\SyncWatchLz")
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.append(os.path.join(exe_dir, ".env"))
+        # Also check _internal alongside server EXE
+        internal_dir = os.path.join(exe_dir, "_internal")
+        candidates.append(os.path.join(internal_dir, ".env"))
+
+    # 2. Current working directory
+    candidates.append(os.path.join(os.getcwd(), ".env"))
+
+    # 3. Script directory (for development)
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(script_dir, ".env"))
+    except Exception:
+        pass
+
+    # Try each location — deduplicate while preserving order
+    seen = set()
+    for env_path in candidates:
+        normalized = os.path.normcase(os.path.normpath(env_path))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if os.path.isfile(env_path):
+            # Try dotenv first, fallback to manual
+            try:
+                from dotenv import load_dotenv
+                if load_dotenv(env_path):
+                    log.info("Loaded .env from: %s", env_path)
+                    return True
+            except ImportError:
+                pass
+            # Manual parse
+            if _load_dotenv_file(env_path):
+                log.info("Loaded .env (manual) from: %s", env_path)
+                return True
+
+    return False
+
+
+env_loaded = _load_env_file()
+if not env_loaded:
+    # Final fallback: try CWD with dotenv
+    try:
+        from dotenv import load_dotenv
+        if load_dotenv():
+            log.info("Loaded .env from current directory")
+    except ImportError:
+        pass
+    # Final manual fallback
+    if _load_dotenv_file(os.path.join(os.getcwd(), ".env")):
+        log.info("Loaded .env (manual) from current directory")
 
 
 # ── Protocol constants (mirror core/protocol.py) ─────────
@@ -726,8 +812,18 @@ class SyncWatchServer:
         log.warning("Failed to get country from geolocation API")
         return "Unknown"
 
-    def register_on_github(self):
-        """Register this server in the syncwatch_servers.json on GitHub."""
+    def register_on_github(self, retries: int = 3):
+        """Register this server in the syncwatch_servers.json on GitHub.
+        
+        Read-modify-write pattern with SHA conflict retry:
+        - Fetches all existing servers from GitHub
+        - Adds/updates THIS server's entry (by URL)
+        - Writes back the complete list
+        - Retries on SHA conflict (409) up to `retries` times
+        
+        This ensures multiple servers can register concurrently without
+        overwriting each other's data.
+        """
         if not self.github_token:
             log.info("No GitHub token provided — skipping server registration")
             return
@@ -736,6 +832,18 @@ class SyncWatchServer:
         if not self._public_url:
             self._public_url = f"ws://{self.get_public_ip()}:{self.port}"
         self._country = self.get_country()
+
+        # Resolve public IP once (cache it to avoid repeated HTTP calls)
+        public_ip = self.get_public_ip()
+
+        server_entry = {
+            "url": self._public_url,
+            "country": self._country,
+            "port": self.port,
+            "host": public_ip,
+            "status": "online",
+            "last_seen": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
 
         log.info("Registering server: %s [%s]", self._public_url, self._country)
 
@@ -746,87 +854,89 @@ class SyncWatchServer:
             "Accept": "application/vnd.github.v3+json",
         }
 
-        servers = []
-        sha = ""
-        file_exists = False
+        for attempt in range(retries):
+            servers = []
+            sha = ""
 
-        try:
-            # Get current file content + SHA
-            req = urllib.request.Request(repo_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-                sha = data.get("sha", "")
-                content_b64 = data.get("content", "")
-                import base64
-                # SHA is always set when file exists
-                if sha:
-                    file_exists = True
-                try:
-                    if content_b64:
-                        current_content = base64.b64decode(content_b64).decode("utf-8")
-                        if current_content.strip():
-                            servers = json.loads(current_content)
-                except (json.JSONDecodeError, Exception):
-                    log.warning("Could not parse existing servers JSON, starting fresh with SHA")
-                    servers = []
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                # File doesn't exist yet - will be created
-                log.info("syncwatch_servers.json does not exist yet - will create it")
-            else:
-                log.warning("Failed to fetch servers file (HTTP %d): %s", e.code, e)
-        except Exception as e:
-            log.warning("Failed to fetch servers file: %s", e)
+            try:
+                # Get current file content + SHA
+                req = urllib.request.Request(repo_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode())
+                    sha = data.get("sha", "")
+                    content_b64 = data.get("content", "")
+                    import base64
+                    try:
+                        if content_b64:
+                            raw_decoded = base64.b64decode(content_b64).decode("utf-8")
+                            if raw_decoded.strip():
+                                # Data on GitHub is encrypted — decrypt first
+                                try:
+                                    decrypted = self.decrypt_servers_data(raw_decoded)
+                                    servers = json.loads(decrypted)
+                                except Exception:
+                                    # Fallback: try as plain JSON (legacy entries)
+                                    servers = json.loads(raw_decoded)
+                    except (json.JSONDecodeError, Exception) as e:
+                        log.warning("Could not parse existing servers JSON (%s), starting fresh", e)
+                        servers = []
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    # File doesn't exist yet — will be created
+                    log.info("syncwatch_servers.json does not exist yet — will create it")
+                else:
+                    log.warning("Failed to fetch servers file (HTTP %d): %s", e.code, e)
+                    continue  # Retry
+            except Exception as e:
+                log.warning("Failed to fetch servers file: %s", e)
+                continue  # Retry
 
-        # Check if this server is already registered
-        server_entry = {
-            "url": self._public_url,
-            "country": self._country,
-            "port": self.port,
-            "host": self.get_public_ip(),
-            "status": "online",
-            "last_seen": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
+            # Remove old entry if this server already exists (by URL), then add new one
+            servers = [s for s in servers if s.get("url") != self._public_url]
+            servers.append(server_entry)
+            servers = servers[-50:]
 
-        # Remove old entry if exists, add new one
-        servers = [s for s in servers if s.get("url") != self._public_url]
-        servers.append(server_entry)
+            # Encrypt and encode
+            new_content_json = json.dumps(servers, indent=2, ensure_ascii=False)
+            encrypted = self.encrypt_servers_data(new_content_json)
+            import base64
+            new_content_b64 = base64.b64encode(encrypted.encode("utf-8")).decode()
 
-        # Keep only last 50 servers
-        servers = servers[-50:]
+            payload_dict = {
+                "message": f"Register server: {self._public_url}",
+                "content": new_content_b64,
+            }
+            if sha:
+                payload_dict["sha"] = sha
 
-        new_content_json = json.dumps(servers, indent=2, ensure_ascii=False)
-        # Encrypt the data before storing on GitHub
-        encrypted = self.encrypt_servers_data(new_content_json)
-        import base64
-        new_content_b64 = base64.b64encode(encrypted.encode("utf-8")).decode()
+            payload = json.dumps(payload_dict).encode()
 
-        # Build payload (SHA is required if file exists, omitted if creating new file)
-        payload_dict = {
-            "message": f"Register server: {self._public_url}",
-            "content": new_content_b64,
-        }
-        if sha:
-            payload_dict["sha"] = sha
+            req = urllib.request.Request(
+                repo_url,
+                data=payload,
+                headers={**headers, "Content-Type": "application/json"},
+                method="PUT",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    result = json.loads(resp.read().decode())
+                    log.info("Server registered on GitHub successfully: %s",
+                             result.get("content", {}).get("sha", "")[:8])
+                    return  # Success — exit
+            except urllib.error.HTTPError as e:
+                body = e.read().decode()
+                if e.code == 409:
+                    # SHA conflict — another server wrote between our read and write
+                    log.info("SHA conflict (attempt %d/%d) — retrying read-modify-write...",
+                             attempt + 1, retries)
+                    continue  # Retry the whole cycle
+                log.error("Failed to register server (HTTP %d): %s", e.code, body)
+                return  # Non-retryable error
+            except Exception as e:
+                log.error("Failed to register server: %s", e)
+                return
 
-        payload = json.dumps(payload_dict).encode()
-
-        req = urllib.request.Request(
-            repo_url,
-            data=payload,
-            headers={**headers, "Content-Type": "application/json"},
-            method="PUT",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read().decode())
-                log.info("Server registered on GitHub successfully: %s",
-                         result.get("content", {}).get("sha", "")[:8])
-        except urllib.error.HTTPError as e:
-            body = e.read().decode()
-            log.error("Failed to register server (HTTP %d): %s", e.code, body)
-        except Exception as e:
-            log.error("Failed to register server: %s", e)
+        log.warning("Failed to register server after %d attempts (SHA conflicts)", retries)
 
     def remove_from_github(self):
         """Remove this server from the GitHub JSON on shutdown."""
@@ -848,16 +958,23 @@ class SyncWatchServer:
                 sha = data.get("sha", "")
                 import base64
                 content_b64 = data.get("content", "")
-                current_content = base64.b64decode(content_b64).decode("utf-8")
-                servers = json.loads(current_content)
+                raw_decoded = base64.b64decode(content_b64).decode("utf-8")
+                # Data on GitHub is encrypted — decrypt first
+                try:
+                    decrypted = self.decrypt_servers_data(raw_decoded)
+                    servers = json.loads(decrypted)
+                except Exception:
+                    # Fallback: try as plain JSON (legacy entries)
+                    servers = json.loads(raw_decoded)
         except Exception as e:
             log.warning("Could not fetch servers file for removal: %s", e)
             return
 
         servers = [s for s in servers if s.get("url") != self._public_url]
-        new_content = json.dumps(servers, indent=2)
+        new_content_json = json.dumps(servers, indent=2, ensure_ascii=False)
+        encrypted = self.encrypt_servers_data(new_content_json)
         import base64
-        new_content_b64 = base64.b64encode(new_content.encode()).decode()
+        new_content_b64 = base64.b64encode(encrypted.encode()).decode()
 
         payload = json.dumps({
             "message": f"Remove server: {self._public_url}",
