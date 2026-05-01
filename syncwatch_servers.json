@@ -46,5 +46,13 @@
     "host": "54.219.56.245",
     "status": "online",
     "last_seen": "2026-05-01T12:52:24Z"
+  },
+  {
+    "url": "ws://52.9.49.147:8765",
+    "country": "United States",
+    "port": 8765,
+    "host": "52.9.49.147",
+    "status": "online",
+    "last_seen": "2026-05-01T12:52:30Z"
   }
 ]
