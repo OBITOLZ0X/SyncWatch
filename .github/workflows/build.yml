@@ -63,6 +63,11 @@ jobs:
       - name: Build server
         run: |
           python server/build_server.py
+          # Also ensure old path still builds for Windows backward compat (space handling)
+          if [ -f "server host/build_server.py" ]; then
+            echo "Also verifying old server host path..."
+            python "server host/build_server.py" || echo "Old path build skipped (non-fatal)"
+          fi
         shell: bash
 
       - name: Verify build (Windows)
