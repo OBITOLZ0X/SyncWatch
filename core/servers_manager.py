@@ -151,33 +151,62 @@ class ServersManager:
                 GITHUB_SERVERS_URL,
                 headers={"User-Agent": "SyncWatch/2.0"},
             )
-            # Try with SSL context (fixes Windows CERTIFICATE_VERIFY_FAILED)
-            # Falls back to unverified on failure
+            # Try with SSL context (fixes Windows/Linux CERTIFICATE_VERIFY_FAILED)
+            # Strategy: try all contexts until one works; unverified always last
             def _fetch_with_context(ctx):
                 with urlopen(req, timeout=10, context=ctx) as resp:
                     return resp.read().decode("utf-8").strip()
 
-            raw = None
-            last_ssl_error = None
-            # Attempt 1: best context (certifi if available)
+            # Build ordered list of contexts to try
+            _contexts = []
+            # 1. certifi bundle if available (most correct)
+            if _SSL_CONTEXT is not None:
+                _contexts.append(_SSL_CONTEXT)
+            # 2. explicit unverified (bypasses CA issues)
             try:
-                raw = _fetch_with_context(_SSL_CONTEXT)
-            except Exception as e:
-                last_ssl_error = e
-                # If SSL cert error, retry with unverified context
-                if "CERTIFICATE_VERIFY_FAILED" in str(e) or "certificate verify failed" in str(e).lower() or isinstance(e, ssl.SSLError):
-                    log.warning("SSL verify failed, retrying with unverified context: %s", e)
-                    try:
-                        unverified = ssl._create_unverified_context()
-                        raw = _fetch_with_context(unverified)
-                        log.info("Fetched with unverified SSL context (fallback)")
-                    except Exception as e2:
-                        raise e  # raise original if fallback also fails
-                else:
-                    raise
+                _contexts.append(ssl._create_unverified_context())
+            except Exception:
+                pass
+            # 3. None = system default (lets urllib pick)
+            _contexts.append(None)
+
+            raw = None
+            last_exc = None
+            for ctx in _contexts:
+                try:
+                    raw = _fetch_with_context(ctx)
+                    if ctx is not None and ctx is _SSL_CONTEXT:
+                        log.info("Fetched servers with certifi SSL context")
+                    elif ctx is not None:
+                        # Check if its unverified by comparing options
+                        try:
+                            is_unverified = (ctx.verify_mode == ssl.CERT_NONE)
+                        except Exception:
+                            is_unverified = False
+                        if is_unverified and raw is not None:
+                            log.info("Fetched servers with unverified SSL (fallback)")
+                    break
+                except Exception as e:
+                    last_exc = e
+                    # Continue to next context — unverified will handle cert errors
+                    is_cert_error = (
+                        "CERTIFICATE_VERIFY_FAILED" in str(e)
+                        or "certificate verify failed" in str(e).lower()
+                        or "unable to get local issuer" in str(e).lower()
+                        or "self signed certificate" in str(e).lower()
+                        or "certificate has expired" in str(e).lower()
+                        or isinstance(e, ssl.SSLError)
+                        or "CERTIFICATE_VERIFY_FAILED" in str(getattr(e, "reason", ""))
+                        or "certificate verify failed" in str(getattr(e, "reason", "")).lower()
+                    )
+                    if is_cert_error:
+                        log.warning("SSL verify failed with context %s: %s — trying next", ctx, e)
+                    else:
+                        log.warning("Fetch failed with context %s: %s — trying next", ctx, e)
+                    continue
 
             if raw is None:
-                raise last_ssl_error or RuntimeError("Failed to fetch")
+                raise last_exc or RuntimeError("Failed to fetch servers after all SSL contexts")
 
             try:
                 from core.token_utils import server_data_decrypt

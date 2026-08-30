@@ -5,6 +5,13 @@ All notable changes to SyncWatch will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] — 2026-08-30
+
+### Fixed
+- **Linux still failing after 2.0.1** — `servers_manager.py` now tries *all* SSL contexts sequentially: certifi → unverified → system default (was only retrying on exact string match; now unconditional fallback, handles `unable to get local issuer`, `self signed`, expired, and `URLError.reason` wrapping)
+- `core/server.py` cleanup fetch also fixed with same multi-context loop
+- Verified `v2.0.1` Linux tarball was 85.8MB but still failed on some distros missing `ca-certificates`; 2.0.2 forces unverified fallback so it works even without system CAs
+
 ## [2.0.1] — 2026-08-30
 
 ### Fixed

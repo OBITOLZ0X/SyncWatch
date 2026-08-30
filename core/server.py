@@ -887,14 +887,35 @@ class SyncServer:
                     # Fetch current servers from GitHub
                     GITHUB_SERVERS_URL = "https://raw.githubusercontent.com/OBITOLZ0X/SyncWatch/main/syncwatch_servers.json"
                     req = Request(GITHUB_SERVERS_URL, headers={"User-Agent": "SyncWatch/2.0"})
-                    
-                    with urlopen(req, timeout=10) as resp:
-                        raw = resp.read().decode("utf-8").strip()
+                    # Linux/Windows SSL fix: try certifi then unverified
+                    import ssl as _ssl2
+                    def _fetch_raw(_req):
+                        _ctxs = []
                         try:
-                            decrypted = server_data_decrypt(raw)
-                            current_servers = json.loads(decrypted)
+                            import certifi
+                            _ctxs.append(_ssl2.create_default_context(cafile=certifi.where()))
                         except Exception:
-                            current_servers = json.loads(raw)
+                            pass
+                        try:
+                            _ctxs.append(_ssl2._create_unverified_context())
+                        except Exception:
+                            pass
+                        _ctxs.append(None)
+                        _last = None
+                        for _c in _ctxs:
+                            try:
+                                with urlopen(_req, timeout=10, context=_c) as _r:
+                                    return _r.read().decode("utf-8").strip()
+                            except Exception as _e:
+                                _last = _e
+                                continue
+                        raise _last
+                    raw = _fetch_raw(req)
+                    try:
+                        decrypted = server_data_decrypt(raw)
+                        current_servers = json.loads(decrypted)
+                    except Exception:
+                        current_servers = json.loads(raw)
 
                     # Remove offline servers
                     updated_servers = [srv for srv in current_servers if srv.get("url") not in removed]
