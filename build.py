@@ -238,4 +238,4 @@ if __name__ == "__main__":
     build(dist_temp, build_temp, lua_script, lua_mpv, onefile=args.onefile)
     package(dist_temp, output_dir, onefile=args.onefile)
     cleanup(dist_temp, build_temp, onefile=args.onefile)
-    print("\nDone! 🎉")
+    print("\nDone!")

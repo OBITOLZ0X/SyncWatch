@@ -147,4 +147,4 @@ if __name__ == "__main__":
     build()
     package()
     cleanup()
-    print("\nDone! 🎉")
+    print("\nDone!")
