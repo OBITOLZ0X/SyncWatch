@@ -125,8 +125,8 @@ jobs:
           DEBCTRL
           # Normalize version for deb (remove v prefix)
           sed -i 's/Version: v/Version: /' deb/DEBIAN/control
-          # If version is not a tag, use 2.0.0
-          if grep -q "Version: \${{" deb/DEBIAN/control 2>/dev/null; then
+          # If version is empty or still contains placeholder, use fallback
+          if ! grep -q "Version: [0-9]" deb/DEBIAN/control 2>/dev/null; then
             echo "Package: syncwatch
           Version: 2.0.0
           Section: video
