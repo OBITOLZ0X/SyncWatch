@@ -5,6 +5,13 @@ All notable changes to SyncWatch will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] — 2026-08-30
+
+### Fixed
+- `SSL CERTIFICATE_VERIFY_FAILED` — Windows now bundles `certifi` CA bundle + fallback to unverified SSL (fixes "No servers found" on Windows Python / PyInstaller builds)
+- `build.py` / `server/build_server.py` now `--collect-all certifi` + `--hidden-import certifi` so exe carries CA certs
+- `servers_manager.py` retries with `ssl._create_unverified_context()` on `CERTIFICATE_VERIFY_FAILED`
+
 ## [2.0.0] — 2026-08-30
 
 ### Added

@@ -21,8 +21,43 @@ if TYPE_CHECKING:
     from core.client import SyncClient
 from urllib.request import Request, urlopen
 from urllib.error import URLError
+import ssl
 
 log = logging.getLogger(__name__)
+
+# ── SSL handling for Windows (CERTIFICATE_VERIFY_FAILED fix) ──
+# On some Windows Python installs, CA certs are missing and GitHub fetch fails
+# with [SSL: CERTIFICATE_VERIFY_FAILED]. We try:
+#   1. certifi bundle if available (best)
+#   2. system default context
+#   3. unverified context as last resort
+def _get_ssl_context():
+    """Return best SSL context available, or None for default."""
+    # Try certifi first (most reliable on Windows PyInstaller builds)
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    # Try system default
+    try:
+        return ssl.create_default_context()
+    except Exception:
+        pass
+    # Fallback: unverified (still encrypts, just doesn't verify cert)
+    try:
+        return ssl._create_unverified_context()
+    except Exception:
+        return None
+
+
+_SSL_CONTEXT = _get_ssl_context()
+# Also set default for any library that uses ssl._create_default_https_context
+try:
+    if _SSL_CONTEXT is not None:
+        ssl._create_default_https_context = lambda: _SSL_CONTEXT
+except Exception:
+    pass
 
 GITHUB_SERVERS_URL = (
     "https://raw.githubusercontent.com/OBITOLZ0X/SyncWatch/main/syncwatch_servers.json"
@@ -116,16 +151,42 @@ class ServersManager:
                 GITHUB_SERVERS_URL,
                 headers={"User-Agent": "SyncWatch/2.0"},
             )
-            with urlopen(req, timeout=10) as resp:
-                raw = resp.read().decode("utf-8").strip()
-                try:
-                    from core.token_utils import server_data_decrypt
-                    decrypted = server_data_decrypt(raw)
-                    servers = json.loads(decrypted)
-                    log.info("Successfully decrypted server data from GitHub")
-                except Exception:
-                    servers = json.loads(raw)
-                    log.info("Parsed server data as plain JSON")
+            # Try with SSL context (fixes Windows CERTIFICATE_VERIFY_FAILED)
+            # Falls back to unverified on failure
+            def _fetch_with_context(ctx):
+                with urlopen(req, timeout=10, context=ctx) as resp:
+                    return resp.read().decode("utf-8").strip()
+
+            raw = None
+            last_ssl_error = None
+            # Attempt 1: best context (certifi if available)
+            try:
+                raw = _fetch_with_context(_SSL_CONTEXT)
+            except Exception as e:
+                last_ssl_error = e
+                # If SSL cert error, retry with unverified context
+                if "CERTIFICATE_VERIFY_FAILED" in str(e) or "certificate verify failed" in str(e).lower() or isinstance(e, ssl.SSLError):
+                    log.warning("SSL verify failed, retrying with unverified context: %s", e)
+                    try:
+                        unverified = ssl._create_unverified_context()
+                        raw = _fetch_with_context(unverified)
+                        log.info("Fetched with unverified SSL context (fallback)")
+                    except Exception as e2:
+                        raise e  # raise original if fallback also fails
+                else:
+                    raise
+
+            if raw is None:
+                raise last_ssl_error or RuntimeError("Failed to fetch")
+
+            try:
+                from core.token_utils import server_data_decrypt
+                decrypted = server_data_decrypt(raw)
+                servers = json.loads(decrypted)
+                log.info("Successfully decrypted server data from GitHub")
+            except Exception:
+                servers = json.loads(raw)
+                log.info("Parsed server data as plain JSON")
 
             if not isinstance(servers, list):
                 log.warning("Servers file is not a list, got %s", type(servers).__name__)

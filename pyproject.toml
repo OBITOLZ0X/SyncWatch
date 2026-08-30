@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "syncwatch"
-version = "2.0.0"
+version = "2.0.1"
 description = "Watch Together, Perfectly Synced — synchronized video watching with friends"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,7 @@ dependencies = [
     "pyngrok>=7.0.0",
     "cryptography>=42.0.0",
     "python-dotenv>=1.0.0",
+    "certifi>=2024.2.2",
 ]
 
 [project.urls]

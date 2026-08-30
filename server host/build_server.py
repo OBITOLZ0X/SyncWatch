@@ -26,7 +26,9 @@ import platform
 APP_NAME = "SyncWatchServer"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ENTRY = os.path.join(SCRIPT_DIR, "server.py")
+# Handle both file names: "server host.py" (with space, legacy Windows) and "server.py"
+_candidates = [os.path.join(SCRIPT_DIR, "server host.py"), os.path.join(SCRIPT_DIR, "server.py")]
+ENTRY = next((p for p in _candidates if os.path.isfile(p)), _candidates[1])
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, APP_NAME)
 DIST_TEMP = os.path.join(SCRIPT_DIR, "_build_server_dist")
 BUILD_TEMP = os.path.join(SCRIPT_DIR, "_build_server_work")
@@ -74,7 +76,9 @@ def build():
         f"--workpath={BUILD_TEMP}",
         "--specpath", SCRIPT_DIR,
         "--collect-all", "pyngrok",
+        "--collect-all", "certifi",
         "--hidden-import", "cryptography",
+        "--hidden-import", "certifi",
         "--hidden-import", "dotenv",
         *add_data,
         ENTRY,
