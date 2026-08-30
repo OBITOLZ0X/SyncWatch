@@ -1,0 +1,77 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pyo
+*.pyc
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+*.spec
+_build_*/
+_build_dist/
+_build_work/
+_build_server_dist/
+_build_server_work/
+SyncWatch.spec
+SyncWatchServer.spec
+.venv/
+venv/
+env/
+ENV/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── PyInstaller ──
+*.manifest
+*.pyinstaller
+SyncWatch/
+SyncWatch.exe
+SyncWatchLz/
+server/SyncWatchServer/
+*.log
+_data/
+
+# ── IDE / OS ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+
+# ── Project specific ──
+_data/
+cache/
+logs/
+*.db
+*.sqlite3
+syncwatch_osd_*.txt
+sw_logo_*/
+gifs/
+
+# ── Secrets ──
+server/.env
+server host/.env
+.env
+*.key
+*.pem
+*.token
+ngrok.log
+ngrok.yml
+
+# ── Release artifacts ──
+*.tar.gz
+*.zip
+*.deb
+*.AppImage
+releases/

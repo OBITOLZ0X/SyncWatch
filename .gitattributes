@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.ico binary
+*.png binary
+*.zip binary
+*.tar.gz binary
+*.deb binary
+*.exe binary
+*.sh text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf

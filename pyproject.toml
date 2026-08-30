@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syncwatch"
+version = "2.0.0"
+description = "Watch Together, Perfectly Synced — synchronized video watching with friends"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "OBITOLZ0X"}]
+keywords = ["sync", "video", "watch-together", "vlc", "mpv", "websocket"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video :: Display",
+]
+dependencies = [
+    "PySide6>=6.5.0",
+    "websockets>=12.0",
+    "pyngrok>=7.0.0",
+    "cryptography>=42.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/OBITOLZ0X/SyncWatch"
+Repository = "https://github.com/OBITOLZ0X/SyncWatch"
+Issues = "https://github.com/OBITOLZ0X/SyncWatch/issues"
+Releases = "https://github.com/OBITOLZ0X/SyncWatch/releases"
+
+[project.scripts]
+syncwatch = "main:main"
+syncwatch-server = "server.server:main"
+
+[tool.setuptools.packages.find]
+include = ["core", "ui", "resources", "server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

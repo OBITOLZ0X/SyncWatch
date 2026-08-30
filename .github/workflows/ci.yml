@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: |
+          pip install ruff
+          pip install -r requirements.txt
+      - name: Ruff check (non-blocking)
+        run: ruff check . --exit-zero
+      - name: Verify imports
+        run: python -c "import core.protocol; import core.token_utils; print('Core imports OK')"
+
+  smoke-test:
+    name: Smoke test (import + build dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+      - name: Test token crypto
+        run: |
+          python -c "
+          from core.token_utils import encode_token, decode_token
+          url='wss://example.ngrok-free.app'
+          tok=encode_token(url)
+          assert decode_token(tok)==url, 'token roundtrip failed'
+          print(f'Token OK: {tok[:20]}...')
+          "
+      - name: Check build scripts syntax
+        run: |
+          python -m py_compile build.py
+          python -m py_compile server/build_server.py
+          python -m py_compile main.py
+          echo "Build scripts compile OK"

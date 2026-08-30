@@ -1,0 +1,232 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            runner: windows-latest
+            arch: x86_64
+            python: "3.11"
+            artifact: SyncWatch-Windows
+            ext: .zip
+          - os: linux
+            runner: ubuntu-latest
+            arch: x86_64
+            python: "3.11"
+            artifact: SyncWatch-Linux
+            ext: .tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install system deps (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libegl1
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build client
+        run: |
+          python build.py
+        shell: bash
+
+      - name: Build server
+        run: |
+          python server/build_server.py
+        shell: bash
+
+      - name: Verify build (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          dir SyncWatchLz
+          dir server/SyncWatchServer
+          if (!(Test-Path "SyncWatchLz/SyncWatch.exe")) { throw "SyncWatch.exe not found" }
+          if (!(Test-Path "server/SyncWatchServer/server.exe")) { throw "server.exe not found" }
+        shell: pwsh
+
+      - name: Verify build (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          ls -lh SyncWatch-Linux/ || ls -lh dist/SyncWatch/ || ls -lh _build_dist/SyncWatch/
+          ls -lh server/SyncWatchServer/
+          test -f SyncWatch-Linux/SyncWatch || test -f dist/SyncWatch/SyncWatch || test -f _build_dist/SyncWatch/SyncWatch
+          test -f server/SyncWatchServer/server
+
+      - name: Create archives (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          Compress-Archive -Path SyncWatchLz -DestinationPath SyncWatch-Windows.zip -Force
+          Compress-Archive -Path server/SyncWatchServer -DestinationPath SyncWatchServer-Windows.zip -Force
+          # Also create versioned names
+          $tag = "${{ github.ref_name }}"
+          if ($tag -match "^v") {
+            Copy-Item SyncWatch-Windows.zip "SyncWatch-$tag-Windows.zip"
+            Copy-Item SyncWatchServer-Windows.zip "SyncWatchServer-$tag-Windows.zip"
+          }
+          dir *.zip
+        shell: pwsh
+
+      - name: Create archives (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          # Find actual output dir
+          OUT="SyncWatch-Linux"
+          if [ ! -d "$OUT" ]; then
+            if [ -d "dist/SyncWatch" ]; then OUT="dist/SyncWatch"; fi
+          fi
+          echo "Using output dir: $OUT"
+          ls -lh "$OUT" | head -20
+
+          # Tar.gz for client
+          tar -czf SyncWatch-Linux.tar.gz -C "$(dirname "$OUT")" "$(basename "$OUT")"
+          # Tar.gz for server
+          tar -czf SyncWatchServer-Linux.tar.gz -C server SyncWatchServer
+
+          # Try to build .deb (optional, non-failing)
+          mkdir -p deb/DEBIAN deb/usr/local/bin deb/usr/local/lib/syncwatch deb/usr/share/applications deb/usr/share/icons
+          cat > deb/DEBIAN/control << DEBCTRL
+          Package: syncwatch
+          Version: ${{ github.ref_name }}
+          Section: video
+          Priority: optional
+          Architecture: amd64
+          Maintainer: OBITOLZ0X <https://github.com/OBITOLZ0X>
+          Description: SyncWatch — Watch Together, Perfectly Synced
+           Synchronized video playback for friends with VLC & MPV support.
+          DEBCTRL
+          # Normalize version for deb (remove v prefix)
+          sed -i 's/Version: v/Version: /' deb/DEBIAN/control
+          # If version is not a tag, use 2.0.0
+          if grep -q "Version: \${{" deb/DEBIAN/control 2>/dev/null; then
+            echo "Package: syncwatch
+          Version: 2.0.0
+          Section: video
+          Priority: optional
+          Architecture: amd64
+          Maintainer: OBITOLZ0X
+          Description: SyncWatch
+           SyncWatch" > deb/DEBIAN/control
+          fi
+          cp -r "$OUT"/* deb/usr/local/lib/syncwatch/ 2>/dev/null || cp -r "$OUT"/. deb/usr/local/lib/syncwatch/
+          chmod +x deb/usr/local/lib/syncwatch/SyncWatch
+          cat > deb/usr/local/bin/syncwatch << 'WRAPPER'
+          #!/usr/bin/env bash
+          exec /usr/local/lib/syncwatch/SyncWatch "$@"
+          WRAPPER
+          chmod +x deb/usr/local/bin/syncwatch
+          cp assets/icon.png deb/usr/share/icons/syncwatch.png 2>/dev/null || true
+          cat > deb/usr/share/applications/syncwatch.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Name=SyncWatch
+          Comment=Watch Together, Perfectly Synced
+          Exec=/usr/local/bin/syncwatch
+          Icon=/usr/share/icons/syncwatch.png
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Player;Network;
+          DESKTOP
+          dpkg-deb --build deb SyncWatch.deb 2>&1 || echo "deb build failed (non-fatal)"
+          ls -lh *.tar.gz *.deb 2>&1 | head -20
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            SyncWatch-*.zip
+            SyncWatch-*.tar.gz
+            SyncWatch.deb
+            SyncWatchServer-*.zip
+            SyncWatchServer-*.tar.gz
+          if-no-files-found: warn
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: |
+          ls -R ./artifacts 2>&1 | head -100
+          ls -lh ./artifacts/* 2>&1 | head -50
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./artifacts/*.zip
+            ./artifacts/*.tar.gz
+            ./artifacts/*.deb
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          body: |
+            ## SyncWatch ${{ github.ref_name }}
+
+            ### 📥 Quick Install
+
+            **Linux:**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/OBITOLZ0X/SyncWatch/main/scripts/install.sh | bash
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            irm https://raw.githubusercontent.com/OBITOLZ0X/SyncWatch/main/scripts/install.ps1 | iex
+            ```
+
+            ### 📦 Manual Downloads
+
+            | Platform | File |
+            |----------|------|
+            | Windows | `SyncWatch-Windows.zip` |
+            | Linux   | `SyncWatch-Linux.tar.gz` |
+            | Linux   | `SyncWatch.deb` (Debian/Ubuntu) |
+            | Server (Win) | `SyncWatchServer-Windows.zip` |
+            | Server (Linux) | `SyncWatchServer-Linux.tar.gz` |
+
+            ### 🔄 Updating
+
+            Just re-run the installer — it will auto-update to the latest version.
+
+            ---
+            **Full Changelog:** https://github.com/OBITOLZ0X/SyncWatch/compare/${{ github.ref_name }}...HEAD
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

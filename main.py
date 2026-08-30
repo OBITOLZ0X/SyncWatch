@@ -86,4 +86,22 @@ def main():
 
 
 if __name__ == "__main__":
+    # Support --version and --help without launching GUI (for installers & CLI)
+    if "--version" in sys.argv or "-v" in sys.argv:
+        try:
+            from core.__version__ import __version__
+        except ImportError:
+            __version__ = "2.0.0"
+        print(f"SyncWatch {__version__}")
+        sys.exit(0)
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("SyncWatch — Watch Together, Perfectly Synced.")
+        print("")
+        print("Usage:  SyncWatch [options]")
+        print("        python main.py [options]")
+        print("")
+        print("Options:")
+        print("  --version, -v   Show version and exit")
+        print("  --help, -h      Show this help and exit")
+        sys.exit(0)
     main()
