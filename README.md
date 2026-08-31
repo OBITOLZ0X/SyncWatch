@@ -15,6 +15,14 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Made%20with-AI-8A2BE2?style=for-the-badge&logo=openai&logoColor=white" alt="Made with AI">
+  <img src="https://img.shields.io/badge/Managed%20by-AI%20Agent-00BFFF?style=for-the-badge&logo=robot&logoColor=white" alt="Managed by AI">
+</p>
+
+> 🤖 **This project was built entirely by AI — from code to builds, releases & repo management.**  
+> The AI agent handles everything: features, fixes, cross-platform builds, installers (`install.sh` / `install.ps1`), GitHub Actions, and releases. Human is the owner & reviewer.
+
+<p align="center">
   <a href="#-quick-install">Quick Install</a> •
   <a href="#-features">Features</a> •
   <a href="#-download">Downloads</a> •
